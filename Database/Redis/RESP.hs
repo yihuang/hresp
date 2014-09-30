@@ -13,7 +13,7 @@ import Data.Attoparsec.ByteString.Char8 hiding (takeTill)
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 
--- |Low-level representation of replies from the Redis server.
+-- | Representation of reply and request.
 data Reply = SingleLine ByteString
            | Error ByteString
            | Integer Integer
@@ -21,7 +21,7 @@ data Reply = SingleLine ByteString
            | MultiBulk (Maybe [Reply])
          deriving (Eq, Show)
 
--- | Do we need to support Null in request?
+-- Do we need to support Null in request ?
 newtype Request = Request [ByteString]
 
 ------------------------------------------------------------------------------
@@ -46,7 +46,7 @@ parseRequest = Request <$> do
         else count len (fromMaybe "" <$> parseBulk)
 
 ------------------------------------------------------------------------------
--- Reply parsers
+-- Reply
 --
 
 showBS :: (Show a) => a -> ByteString
@@ -71,22 +71,16 @@ renderReply reply = B.concat (render reply)
     render (MultiBulk (Just replies)) = ["*", showBS (length replies)] ++ concatMap render replies
 
 parseReply :: Parser Reply
-parseReply = choice [singleLine, integer, bulk, multiBulk, error]
+parseReply = choice
+    [ SingleLine <$> (char '+' *> takeTill isEndOfLine <* endOfLine)
+    , Integer <$> (char ':' *> signed decimal <* endOfLine)
+    , Bulk <$> parseBulk
+    , parseMultiBulk
+    , Error <$> (char '-' *> takeTill isEndOfLine <* endOfLine)
+    ]
 
-singleLine :: Parser Reply
-singleLine = SingleLine <$> (char '+' *> takeTill isEndOfLine <* endOfLine)
-
-error :: Parser Reply
-error = Error <$> (char '-' *> takeTill isEndOfLine <* endOfLine)
-
-integer :: Parser Reply
-integer = Integer <$> (char ':' *> signed decimal <* endOfLine)
-
-bulk :: Parser Reply
-bulk = Bulk <$> parseBulk
-
-multiBulk :: Parser Reply
-multiBulk = MultiBulk <$> do
+parseMultiBulk :: Parser Reply
+parseMultiBulk = MultiBulk <$> do
     len <- char '*' *> signed decimal <* endOfLine
     if len < 0
         then return Nothing
